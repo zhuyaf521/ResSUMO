@@ -1,0 +1,840 @@
+from __future__ import division
+import docx
+from numpy import *
+import numpy as np
+from sklearn import tree
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis, QuadraticDiscriminantAnalysis
+from sklearn.model_selection import train_test_split
+from sklearn.model_selection import StratifiedKFold
+from  sklearn.model_selection import GridSearchCV
+from sklearn.datasets import make_classification
+from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier
+# import tensorflow as tf
+import math
+from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import cross_val_predict
+from sklearn import metrics
+from sklearn.metrics import make_scorer
+from sklearn.metrics import roc_auc_score
+from sklearn.metrics import f1_score, confusion_matrix, roc_curve, auc, \
+            classification_report, recall_score, precision_recall_curve,accuracy_score,matthews_corrcoef
+from mlxtend.classifier import StackingClassifier
+from sklearn.naive_bayes import GaussianNB, BernoulliNB
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.linear_model import LogisticRegression, Perceptron, LinearRegression
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.svm import SVC
+from sklearn.linear_model import LogisticRegression
+from sklearn.naive_bayes import MultinomialNB
+import geatpy as ga
+from gcforest.gcforest import GCForest
+
+# from code_templet import code_templet
+from new_code_templet import new_code_templet
+from new_code_templet import new_code_templetX
+
+
+def getSite(filename):
+    doc = docx.Document(filename)
+    siteList = []
+    for site in doc.paragraphs:
+        siteList.append(site.text)
+    #print(siteList)
+    return siteList
+
+# 判断是否为天然氨基酸，用X代表其他所有氨基酸，所有氨基酸用数字来替代，构造单个频率矩阵以及n_gram频率矩阵
+def replace_no_native_amino_acid(lists, datatype):
+    native_amino_acid = ('A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L',
+                         'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W', 'Y',)
+    # num_list = []
+    # print(len(lists))
+    # print(len(lists[0]))
+    # print(native_amino_acid[0])
+    numlists = zeros((len(lists), 22))
+    frequency_array = zeros((21, 21))
+    n_gram_frequency_array = zeros((400, 20))
+    flag = 1
+    for site in range(len(lists)):
+        for i in range(len(lists[0])):# 位点位置
+            for j in range(len(native_amino_acid)):# 氨基酸种类
+                # print(site, i, j)
+                if lists[site][i] == native_amino_acid[j]:
+                    numlists[site][i] = j+1
+                    frequency_array[j][i] = frequency_array[j][i] + 1
+                    flag = 0
+                    if i > 0 & i < (len(lists[0])-2):
+                        a = (numlists[site][i-1]-1) * 20
+                        b = numlists[site][i] - 1
+                        n_gram_index = int(a + b)
+                        # print(a)
+                        n_gram_frequency_array[n_gram_index][i-1] = n_gram_frequency_array[n_gram_index][i-1] + 1
+                    break
+            if flag != 0:
+                # site = site[:i] + 'X' +site[i+1:]
+                numlists[site][i] = 21
+                frequency_array[20][i] = frequency_array[20][i]+1
+            flag = 1
+            if datatype == 1:
+                numlists[site][21] = 1
+            # print(i)
+                # print(site)
+        # replaced_list.append(site)
+        # print(site)
+    length = len(lists)
+    for i in range(len(frequency_array)):
+        for j in range(len(frequency_array[0])):
+            frequency_array[i][j] =frequency_array[i][j]/length
+    for i in range(len(n_gram_frequency_array)):
+        for j in range(len(n_gram_frequency_array[0])):
+            n_gram_frequency_array[i][j] = n_gram_frequency_array[i][j]/length
+    # for r in n_gram_frequency_array:
+    #     print(r)
+    # print(frequency_array)
+    return numlists, frequency_array, n_gram_frequency_array
+
+# 构造skip_gram的频率矩阵
+def get_skip_gram_frequency_array(lists, datatype, k):
+    native_amino_acid = ('A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L',
+                         'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W', 'Y',)
+    # print(len(lists))
+    numlists = zeros((len(lists), 22))
+    skip_gram_frequency_array = zeros((400, 20-k))
+    flag = 1
+    for site in range(len(lists)):
+        for i in range(len(lists[0])):  # 位点位置
+            for j in range(len(native_amino_acid)):  # 氨基酸种类
+                # print(site, i, j)
+                if lists[site][i] == native_amino_acid[j]:
+                    numlists[site][i] = j + 1
+                    flag = 0
+                    if i > k:
+                        a = (numlists[site][i - k - 1] - 1) * 20
+                        b = numlists[site][i] - 1
+                        skip_gram_index = int(a + b)
+                        # print(a)
+                        skip_gram_frequency_array[skip_gram_index][i - k - 1] = skip_gram_frequency_array[skip_gram_index][i-k-1] + 1
+                    break
+            if flag != 0:
+                # site = site[:i] + 'X' +site[i+1:]
+                numlists[site][i] = 21
+            flag = 1
+            if datatype == 1:
+                numlists[site][21] = 1
+                # print(i)
+                # print(site)
+                # replaced_list.append(site)
+                # print(site)
+    length = len(lists)
+    for i in range(len(skip_gram_frequency_array)):
+        for j in range(len(skip_gram_frequency_array[0])):
+            skip_gram_frequency_array[i][j] = skip_gram_frequency_array[i][j] / length
+    # for r in skip_gram_frequency_array:
+    #     print(r)
+    # print(frequency_array)
+    return skip_gram_frequency_array
+
+
+# exmplelist = ['AAAAAAAAAAKAAAAAAAAAA', 'CCCCCCCCCCKCCCCCCCCCC', 'AAAAAAAAAAKAAAAAAAAAA',
+#               'AAAAAAAAAAKAAAAAAAAAA', 'AAAAAAAAAAKAAAAAAAAAA']
+# skip_gram_frequency_array(exmplelist, 1, 1)
+
+# 正样本频率减去负样本频率得到整体样本频率
+def result_frequency_site(positive_site, negative_site,datatype):
+    result_site = zeros((len(positive_site), len(positive_site[0])))
+    for i in range(len(positive_site)):
+        for j in range(len(positive_site[0])):
+            if datatype == "frequency":
+                result_site[i][j] = positive_site[i][j] - negative_site[i][j]
+            elif datatype == "entropy":
+                result_site[i][j] = negative_site[i][j] - positive_site[i][j]
+    # print(result_site)
+    return result_site
+
+# 把序号表示矩阵转换到频率表示或熵表示
+def to_site(lists, datatype, frequency_array):
+    full_frequency_array = zeros((len(lists), 22))
+    # print(len(lists))
+    j = 0
+    for site in range(len(lists)):
+        # j = j+1
+        for i in range(len(lists[0])-1):#位点位置
+            # print(full_frequency_array[j][0])
+            position = int(lists[site][i])
+            # print(position)
+            # print(shape(position))
+            full_frequency_array[site][i] =frequency_array[position-1][i]
+        if datatype == 1:#标记正负样本
+            full_frequency_array[site][21] = 1
+    # for r in full_frequency_array:
+    #     if datatype ==1:
+    #         print(r)
+    #     # print(r)
+    return full_frequency_array
+
+# 把序号表示矩阵转换到n_gram频率表示
+def to_n_gram_site(lists, datatype, n_gram_frequency_array):
+    full_n_gram_frequency_array = zeros((len(lists), 21))
+    # print(len(lists))
+    for site in range(len(lists)):
+        for i in range(len(lists[0])-1):#位点位置
+            if i > 0:
+                position_a = int(lists[site][i-1]) - 1
+                position_b = int(lists[site][i]) - 1
+                position_index = int(position_a * 20 + position_b)
+                full_n_gram_frequency_array[site][i-1] = n_gram_frequency_array[position_index][i-1]
+        if datatype == 1:#标记正负样本
+            full_n_gram_frequency_array[site][20] = 1
+    # for r in full_frequency_array:
+    #     if datatype ==1:
+    #         print(r)
+    #     # print(r)
+    return full_n_gram_frequency_array
+
+# 把序号表示矩阵转换到skip_gram频率表示
+def to_skip_gram_site(lists, datatype,skip_gram_frequency_array, k):
+    full_skip_gram_frequency_array = zeros((len(lists), 21-k))
+    # print(len(lists))
+    for site in range(len(lists)):
+        for i in range(len(lists[0])-1):#位点位置
+            if i > k:
+                position_a = int(lists[site][i-1-k]) - 1
+                position_b = int(lists[site][i]) - 1
+                position_index = int(position_a * 20 + position_b)
+                full_skip_gram_frequency_array[site][i-1-k] = skip_gram_frequency_array[position_index][i-1-k]
+        if datatype == 1:#标记正负样本
+            arraylen = len(full_skip_gram_frequency_array[0])-1
+            full_skip_gram_frequency_array[site][arraylen] = 1
+    # for r in full_skip_gram_frequency_array:
+    #     print(r)
+    return full_skip_gram_frequency_array
+
+# 算出每一列的熵
+def entropy_of_site(arrays):
+    entropy_arrays = zeros((len(arrays), 2))
+    for site in range(len(arrays)):
+        for i in range(len(arrays[0])-1):
+            if arrays[site][i] == 0:
+                break
+            else:
+                entropy_arrays[site][0] = entropy_arrays[site][0] - arrays[site][i] * np.math.log(arrays[site][i])
+        entropy_arrays[site][1] = arrays[site][len(arrays[0])-1]
+    # for r in arrays:
+    #     print(r)
+    return entropy_arrays
+
+# # 算出每一列的序列特异性评分sequence specificity score,传入的是序号矩阵，正负频率分数，
+# def specificity_score_of_site(arrays,positive_site,negative_site, datatype):
+#     specificity_score_arrays = zeros((len(arrays), 2))
+#     for i in range(len(arrays)):
+#         for j in range(len(arrays[0])-1):
+#             if positive_site[i][j] == 0 & negative_site[i][j] == 0:
+#                 break
+#             else:
+#                 score_p = score_p + 0.5 * positive_array[i][j] * np.math.log(positive_array[i][j]/(positive_array[i][j]+negative_array[i][j]))
+#                 score_n = score_n + 0.5 * negative_array[i][j] * np.math.log(negative_array[i][j]/(positive_array[i][j]+negative_array[i][j]))
+#         specificity_score_arrays[i][0] = 0 - score_p - score_n
+#         specificity_score_arrays[i][1] = datatype
+#     return specificity_score_arrays
+
+# 条件频率矩阵,传入的是整体的频率矩阵
+def conditional_frequency(arrays):
+    conditional_frequency_array = zeros((len(arrays), len(arrays[0])))
+    for site in range(len(arrays)):
+        for i in range(len(arrays[0])):
+            # print(len(arrays[0]))
+            if arrays[site][i] ==0:
+                conditional_frequency_array[site][i] = 0
+            else:
+                if (i < 9) & (i >= 0):
+                    conditional_frequency_array[site][i] = arrays[site][i] / (arrays[site][i + 1])
+                elif (i > 11):
+                    conditional_frequency_array[site][i] = arrays[site][i] / (arrays[site][i - 1])
+        conditional_frequency_array[site][9] = arrays[site][9]
+        conditional_frequency_array[site][10] = arrays[site][10]
+        conditional_frequency_array[site][11] =arrays[site][11]
+    # for r in conditional_frequency_array:
+    #     print(r)
+    return conditional_frequency_array
+
+# 根据氨基酸在—1和+2的出现的氨基酸的特性构造两组特征
+def hydrophobic_position_array(allarrary, datatype):
+    native_amino_acid = ('A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L',
+                         'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W', 'Y',)
+    type1 = ('I', 'L', 'V',)
+    # 0.4388
+    type2 = ('A', 'F', 'M', 'P', 'W',)
+    # -0.031
+    type3 = ('G', 'Y',)
+    # -0.0644
+    # other：-0.3725
+    type4 = ('D', 'E',)
+    # 0.6287
+    # -0.6299
+    position1_array = zeros((len(allarrary), 3))
+    for i in range(len(allarrary)-1):
+
+        # print(allarrary[i][9])
+        if allarrary[i][9] in type1:
+            position1_array[i][0] = 0.4388
+        elif allarrary[i][9] in type2:
+            position1_array[i][0] = -0.031
+        elif allarrary[i][9] in type3:
+            position1_array[i][0] = -0.064
+        else:
+            position1_array[i][0] = -0.3725
+
+        # print(allarrary[i][12])
+        if allarrary[i][12] in type4:
+            position1_array[i][1] = 0.6287
+        else:
+            position1_array[i][1] = -0.6299
+        position1_array[i][2] = datatype
+    # for r in position1_array:
+    #     print(r)
+    return position1_array
+
+# 根据氨基酸在—1和+2的出现的氨基酸的特性构造两组特征（0，1表示法）
+def hydrophobic_position_array0(allarrary, datatype):
+    native_amino_acid = ('A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L',
+                         'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W', 'Y',)
+    type1 = ('I', 'L', 'V',)
+    # 0.4388
+    type2 = ('A', 'F', 'M', 'P', 'W',)
+    # -0.031
+    type3 = ('G', 'Y',)
+    # -0.0644
+    # other：-0.3725
+    type4 = ('D', 'E',)
+    # 0.6287
+    # -0.6299
+    position1_array = zeros((len(allarrary), 6))
+    for i in range(len(allarrary)-1):
+
+        # print(allarrary[i][9])
+        if allarrary[i][9] in type1:
+            for j in range(4):
+                if j == 3:
+                    position1_array[i][j] = 1
+                else:
+                    position1_array[i][j] = 0
+        elif allarrary[i][9] in type2:
+            for j in range(4):
+                if j == 2:
+                    position1_array[i][j] = 1
+                else:
+                    position1_array[i][j] = 0
+        elif allarrary[i][9] in type3:
+            for j in range(4):
+                if j == 1:
+                    position1_array[i][j] = 1
+                else:
+                    position1_array[i][j] = 0
+        else:
+            for j in range(4):
+                if j == 0:
+                    position1_array[i][j] = 1
+                else:
+                    position1_array[i][j] = 0
+
+        # print(allarrary[i][12])
+        if allarrary[i][12] in type4:
+            position1_array[i][4] = 0
+        else:
+            position1_array[i][4] = 1
+        position1_array[i][5] = datatype
+    # for r in position1_array:
+    #     print(r)
+    return position1_array
+
+# 特征矩阵拼接
+def splice_feature_array(feature_array_x, feature_array_y):
+    sum_feature_array = zeros((len(feature_array_x), len(feature_array_x[0])+len(feature_array_y[0])-1))
+    for site in range(len(sum_feature_array)):
+        for i in range(len(feature_array_x[0])-1):
+            sum_feature_array[site][i] = feature_array_x[site][i]
+        for i in range(len(feature_array_x[0])-1, len(sum_feature_array[0])):
+            sum_feature_array[site][i] = feature_array_y[site][i+1-len(feature_array_x[0])]
+    return sum_feature_array
+
+# 保证生成的随机状态一致
+random_state = 2018
+np.random.seed(random_state)
+#获取平均数
+def Get_Average(list):
+   sum = 0
+   for item in list:
+      sum += item
+   return sum/len(list)
+
+def RandomForest_prediction(feature_data, result_data):
+    kf = StratifiedKFold(n_splits=5) # 分层采样，确保训练集，测试集中各类别样本的比例与原始数据集中相同，需要目标数据
+    all_pred = np.zeros(feature_data.shape[0])
+    all_proba = np.zeros(feature_data.shape[0])
+    random_state = 2019
+    for train_index, test_index in kf.split(feature_data, result_data):
+        feature_train, feature_test, result_train, result_test= \
+            feature_data[train_index], feature_data[test_index], result_data[train_index], result_data[test_index]
+        # clf = RandomForestClassifier()
+        # clf =RandomForestClassifier(bootstrap=True, criterion='entropy', max_depth=8,
+        #                        max_features=None, max_leaf_nodes=4, min_impurity_decrease=0.0,
+        #                        min_impurity_split=None, min_samples_leaf=1, min_samples_split=10,
+        #                        min_weight_fraction_leaf=0.0, n_estimators=70, n_jobs=-1, oob_score=False,
+        #                        random_state=random_state, verbose=0, warm_start=False)
+        class_weight = {0: 1, 1: 10}
+        class_weight[1] = 20
+        print(class_weight)
+        clf= RandomForestClassifier(bootstrap=True, criterion='entropy', max_depth=15,
+                               max_features=40, max_leaf_nodes=None, min_impurity_decrease=0.0,
+                               min_impurity_split=None, min_samples_leaf=1, min_samples_split=2,
+                               min_weight_fraction_leaf=0.0, n_estimators=174, n_jobs=-1, oob_score=False,
+                               random_state=random_state, verbose=0, warm_start=False, class_weight=class_weight)
+        #  "n_estimators": 70, "min_samples_leaf": 4, "min_samples_split": 10, "max_depth": 8, "class_weight": "balanced", "n_jobs": -1
+        # result_train.ravel()
+        clf.fit(feature_train, result_train.ravel())
+        test_pred = clf.predict(feature_test)
+        test_proba = clf.predict_proba(feature_test)
+        all_pred[test_index] = test_pred
+        all_proba[test_index] = test_proba[:, 1]
+    confmat = confusion_matrix(result_data, all_pred)
+    sn = confmat[1, 1] / (confmat[1, 0] + confmat[1, 1])
+    sp = confmat[0, 0] / (confmat[0, 0] + confmat[0, 1])
+    print('1. The acc score of the model {}\n'.format(accuracy_score(result_data, all_pred)))
+    print('2. The sp score of the model {}\n'.format(sp))
+    print('3. The sn score of the model {}\n'.format(sn))
+    print('4. The mcc score of the model {}\n'.format(matthews_corrcoef(result_data, all_pred)))
+    print('9. The auc score of the model {}\n'.format(roc_auc_score(result_data, all_proba, average='macro')))
+    print('5. The F-1 score of the model {}\n'.format(f1_score(result_data, all_pred, average='macro')))
+
+def ExtraTree_prediction(feature_data, result_data):
+    n_splits=5
+    kf = StratifiedKFold(n_splits=n_splits) # 分层采样，确保训练集，测试集中各类别样本的比例与原始数据集中相同，需要目标数据
+    all_pred = np.zeros(feature_data.shape[0])
+    all_proba = np.zeros(feature_data.shape[0])
+    for train_index, test_index in kf.split(feature_data, result_data):
+        feature_train, feature_test, result_train, result_test= \
+            feature_data[train_index], feature_data[test_index], result_data[train_index], result_data[test_index]
+        class_weight = {0: 1, 1: 1}
+        clf = ExtraTreesClassifier(random_state=random_state, class_weight=class_weight)
+        clf.fit(feature_train, result_train.ravel())
+        test_pred = clf.predict(feature_test)
+        test_proba = clf.predict_proba(feature_test)
+        all_pred[test_index] = test_pred
+        all_proba[test_index] = test_proba[:, 1]
+    confmat = confusion_matrix(result_data, all_pred)
+    sn = confmat[1, 1] / (confmat[1, 0] + confmat[1, 1])
+    sp = confmat[0, 0] / (confmat[0, 0] + confmat[0, 1])
+    print('1. The acc score of the model {}\n'.format(accuracy_score(result_data, all_pred)))
+    print('2. The sp score of the model {}\n'.format(sp))
+    print('3. The sn score of the model {}\n'.format(sn))
+    print('4. The mcc score of the model {}\n'.format(matthews_corrcoef(result_data, all_pred)))
+    print('9. The auc score of the model {}\n'.format(roc_auc_score(result_data, all_proba, average='macro')))
+    print('5. The F-1 score of the model {}\n'.format(f1_score(result_data, all_pred, average='macro')))
+
+def LogisticRegression_prediction(feature_data, result_data):
+    n_splits=5
+    kf = StratifiedKFold(n_splits=n_splits) # 分层采样，确保训练集，测试集中各类别样本的比例与原始数据集中相同，需要目标数据
+    all_pred = np.zeros(feature_data.shape[0])
+    all_proba = np.zeros(feature_data.shape[0])
+    for train_index, test_index in kf.split(feature_data, result_data):
+        feature_train, feature_test, result_train, result_test= \
+            feature_data[train_index], feature_data[test_index], result_data[train_index], result_data[test_index]
+        class_weight = {0: 1, 1: 13}
+        clf = LogisticRegression(class_weight=class_weight)
+        clf.fit(feature_train, result_train.ravel())
+        test_pred = clf.predict(feature_test)
+        test_proba = clf.predict_proba(feature_test)
+        all_pred[test_index] = test_pred
+        all_proba[test_index] = test_proba[:, 1]
+    confmat = confusion_matrix(result_data, all_pred)
+    sn = confmat[1, 1] / (confmat[1, 0] + confmat[1, 1])
+    sp = confmat[0, 0] / (confmat[0, 0] + confmat[0, 1])
+    print('1. The acc score of the model {}\n'.format(accuracy_score(result_data, all_pred)))
+    print('2. The sp score of the model {}\n'.format(sp))
+    print('3. The sn score of the model {}\n'.format(sn))
+    print('4. The mcc score of the model {}\n'.format(matthews_corrcoef(result_data, all_pred)))
+    print('9. The auc score of the model {}\n'.format(roc_auc_score(result_data, all_proba, average='macro')))
+    print('5. The F-1 score of the model {}\n'.format(f1_score(result_data, all_pred, average='macro')))
+def get_toy_config():
+    config = {}
+    ca_config = {}
+    ca_config["random_state"] = 0  # 0 or 1
+    ca_config["max_layers"] = 10  #最大的层数，layer对应论文中的level
+    ca_config["early_stopping_rounds"] = 3  #如果出现某层的三层以内的准确率都没有提升，层中止
+    ca_config["n_classes"] = 2      #判别的类别数量
+    ca_config["estimators"] = []
+    # ca_config["estimators"].append(
+    #         {"n_folds": 5, "type": "XGBClassifier", "n_estimators": 10, "max_depth": 5,i
+    #          "objective": "multi:softprob", "silent": True, "nthread": -1, "learning_rate": 0.1} )
+    ca_config["estimators"].append({"n_folds": 5, "type": "RandomForestClassifier", "n_estimators": 70, "min_samples_leaf": 4, "min_samples_split": 10, "max_depth": 8, "class_weight": "balanced", "n_jobs": -1})
+    ca_config["estimators"].append({"n_folds": 5, "type": "ExtraTreesClassifier", "n_estimators": 100, "min_samples_leaf": 4, "min_samples_split": 10, "max_depth": 8, "class_weight": dict({0: 1, 1: 1}), "n_jobs": -1})
+    ca_config["estimators"].append({"n_folds": 5, "type": "LogisticRegression", "class_weight": "balanced", "penalty" : "l2", "solver": "lbfgs"})
+    config["cascade"] = ca_config    #共使用了四个基学习器
+    return config
+
+def get_config():
+    config = {}
+    ca_config = {}
+    ca_config["random_state"] = 0  # 0 or 1
+    ca_config["max_layers"] = 10  #最大的层数，layer对应论文中的level
+    ca_config["early_stopping_rounds"] = 3  #如果出现某层的三层以内的准确率都没有提升，层中止
+    ca_config["n_classes"] = 2      #判别的类别数量
+    ca_config["estimators"] = []
+    # ca_config["estimators"].append(
+    #         {"n_folds": 5, "type": "XGBClassifier", "n_estimators": 10, "max_depth": 5,
+    #          "objective": "multi:softprob", "silent": True, "nthread": -1, "learning_rate": 0.1} )
+    ca_config["estimators"].append({"n_folds": 5, "type": "RandomForestClassifier", "n_jobs": -1})
+    ca_config["estimators"].append({"n_folds": 5, "type": "ExtraTreesClassifier", "n_jobs": -1})
+    ca_config["estimators"].append({"n_folds": 5, "type": "LogisticRegression"})
+    config["cascade"] = ca_config    #共使用了四个基学习器
+    return config
+
+# get_toy_config()生成的结构，如下所示：
+'''
+{
+"cascade": {
+    "random_state": 0,
+    "max_layers": 100,000000000000000000000000000000
+    "early_stopping_rounds": 3,
+    "n_classes": 2,
+    "estimators": 
+    [
+        {"n_folds":5,"type":"ExtraTreesClassifier","n_estimators":10,
+		"max_depth":null,"n_jobs":-1},
+       {"n_folds":5,"type":"RandomForestClassifier","n_estimators":10,
+		"max_depth":null,"n_jobs":-1},
+        { "n_folds": 5, "type": "LogisticRegression"}
+    ]
+}
+}
+'''
+
+def GAGCForest_prediction0(feature_data, result_data):
+    # 获取函数接口地址
+    AIM_M = __import__('aimfuc')
+    AIM_F = 'gcforestCM'
+    """============================变量设置============================"""
+    wR = [0.01, 1]
+    wE = [0.01, 1]
+    wL = [0.01, 1]
+    bR = [1, 1]
+    bE = [1, 1]
+    bL = [1, 1]
+    w1 = [0, 1]
+    w2 = [0, 1]
+    w3 = [0, 1]
+    b1 = [1, 1]
+    b2 = [1, 1]
+    b3 = [1, 1]
+    ranges = np.vstack([w1, w2, w3, wR, wE, wL]).T  # 生成自变量的范围矩阵
+    borders = np.vstack([b1, b2, b3, bR, bE, bL]).T  # 生成自变量的边界矩阵
+    # ranges = np.vstack([np.zeros((1, 3)), np.ones((1, 3))])  # 生成自变量的范围矩阵
+    # print(shape(ranges))
+    # borders = np.vstack([.ones((1, 3)), np.ones((1, 3))])  # 生成自变量的边界矩阵
+    precisions = [6] * 6  # 自变量的编码精度
+    scales = [0] * 6
+    codes = [1] * 6
+    # print(np.ones((1, 300)))
+    # scales = list(np.zeros((1, 300)))  # 采用算术刻度
+    # codes = np.vstack([np.ones((1, 300)), np.ones((1, 300))])  # 变量的编码方式，2个变量均使用格雷编码
+    # print(shape(codes))
+    """========================遗传算法参数设置========================="""
+    # NIND = 50  # 种群规模
+    # MAXGEN = 100  # 最大遗传代数
+    # GGAP = 0.8  # 代沟：子代与父代个体不相同的概率为0.8
+    # selectStyle = 'sus';  # 遗传算法的选择方式设为"sus"——随机抽样选择
+    # recombinStyle = 'xovdp'  # 遗传算法的重组方式，设为两点交叉
+    # recopt = 0.9  # 交叉概率
+    # pm = 0.1  # 变异概率
+    # SUBPOP = 1  # 设置种群数为1
+    # maxormin = 1  #
+    # 设置最大最小化目标标记为1，表示是最小化目标，-1则表示最大化目标
+
+    FieldD = ga.crtfld(ranges, borders, precisions, codes, scales)  #
+
+    # 调用编程模板
+    [weightarray, pop_trace, var_trace, times, X_test_enc, Y_test] = new_code_templetX(AIM_M, AIM_F, None, None, FieldD, problem='R',
+                                                             maxormin=-1,
+                                                             MAXGEN=10, NIND=50, SUBPOP=1, GGAP=0.8,
+                                                             selectStyle='sus',
+                                                             recombinStyle='xovsp', recopt=0.9, pm=0.7,
+                                                             distribute=True,
+                                                             feature_data=feature_data, result_data=result_data,
+                                                             drawing=0)
+    print('用时：', times, '秒')
+    # w3 = 1 - weight[0] - weight[1]
+    # print(weight)
+
+    # weightarray = np.concatenate((weight, [w3]), axis=0)
+    weightarray = weightarray[:3]
+    for element in weightarray:
+        print(element)
+    test_probaF = X_test_enc[:, ::2].T
+    test_probaT = X_test_enc[:, 1::2].T
+    test_predT = np.dot(weightarray, test_probaT)
+    test_predF = np.dot(weightarray, test_probaF)
+    test_pred = np.zeros(len(test_predT))
+    test_proba = np.zeros(len(test_predT))
+    for i in range(len(test_predT)):
+        temper = test_predT[i] + test_predF[i]
+        test_proba = test_predT/temper
+        if (test_predT[i] > test_predF[i]):
+            test_pred[i] = 1
+        else:
+            test_pred[i] = 0
+    confmat = confusion_matrix(Y_test, test_pred)
+    sn = confmat[1, 1] / (confmat[1, 0] + confmat[1, 1])
+    sp = confmat[0, 0] / (confmat[0, 0] + confmat[0, 1])
+    print('1. The acc score of the model {}\n'.format(accuracy_score(Y_test, test_pred)))
+    print('2. The sp score of the model {}\n'.format(sp))
+    print('3. The sn score of the model {}\n'.format(sn))
+    print('4. The mcc score of the model {}\n'.format(matthews_corrcoef(Y_test, test_pred)))
+
+    print('9. The auc score of the model {}\n'.format(roc_auc_score(Y_test, test_proba, average='macro')))
+    print('6. The recall score of the model {}\n'.format(recall_score(Y_test, test_pred, average='macro')))
+    print('5. The F-1 score of the model {}\n'.format(f1_score(Y_test, test_pred, average='macro')))
+    print('7. Classification report \n {} \n'.format(classification_report(Y_test, test_pred)))
+    print('8. Confusion matrix \n {} \n'.format(confusion_matrix(Y_test, test_pred)))
+
+def GAGCForest_prediction(feature_data, result_data, feature_test, result_test):
+    n_splits = 5
+    skfolds = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state).split(feature_data,
+                                                                                                result_data)
+    prediction_result_cv = []
+    prediction_result_ind = []
+    categories = sorted(set(result_data))
+    for j, (train_idx, test_idx) in enumerate(skfolds):
+        X_train = feature_data[train_idx]
+        Y_train = result_data[train_idx]
+        X_test = feature_data[test_idx]
+        Y_test = result_data[test_idx]
+        config = get_toy_config()
+        gc = GCForest(config)  # should be a dict
+        X_train_enc = gc.fit_transform(X_train, Y_train)
+        y_pred = gc.predict(X_test)
+        my_pred = gc.predict(feature_test)
+        X_test_enc = gc.transform(X_test)
+        my_test_enc = gc.transform(feature_test)
+        # 获取函数接口地址
+        AIM_M = __import__('aimfuc')
+        AIM_F = 'gcforestCM'
+        """============================变量设置============================"""
+        w1 = [0, 1]
+        w2 = [0, 1]
+        w3 = [0, 1]
+        b1 = [1, 1]
+        b2 = [1, 1]
+        b3 = [1, 1]
+        ranges = np.vstack([w1, w2, w3]).T  # 生成自变量的范围矩阵
+        borders = np.vstack([b1, b2, b3]).T  # 生成自变量的边界矩阵
+        # ranges = np.vstack([np.zeros((1, 3)), np.ones((1, 3))])  # 生成自变量的范围矩阵
+        # print(shape(ranges))
+        # borders = np.vstack([.ones((1, 3)), np.ones((1, 3))])  # 生成自变量的边界矩阵
+        precisions = [6] * 3  # 自变量的编码精度
+        scales = [0] * 3
+        codes = [1] * 3
+        # print(np.ones((1, 300)))
+        # scales = list(np.zeros((1, 300)))  # 采用算术刻度
+        # codes = np.vstack([np.ones((1, 300)), np.ones((1, 300))])  # 变量的编码方式，2个变量均使用格雷编码
+        # print(shape(codes))
+        """========================遗传算法参数设置========================="""
+        # NIND = 50  # 种群规模
+        # MAXGEN = 100  # 最大遗传代数
+        # GGAP = 0.8  # 代沟：子代与父代个体不相同的概率为0.8
+        # selectStyle = 'sus';  # 遗传算法的选择方式设为"sus"——随机抽样选择
+        # recombinStyle = 'xovdp'  # 遗传算法的重组方式，设为两点交叉
+        # recopt = 0.9  # 交叉概率
+        # pm = 0.1  # 变异概率
+        # SUBPOP = 1  # 设置种群数为1
+        # maxormin = 1  #
+        # 设置最大最小化目标标记为1，表示是最小化目标，-1则表示最大化目标
+
+        FieldD = ga.crtfld(ranges, borders, precisions, codes, scales)  #
+
+        # 调用编程模板
+        [weightarray, pop_trace, var_trace, times] = new_code_templet(AIM_M, AIM_F, None, None, FieldD, problem='R',
+                                                                 maxormin=-1,
+                                                                 MAXGEN=10, NIND=50, SUBPOP=1, GGAP=0.8,
+                                                                 selectStyle='sus',
+                                                                 recombinStyle='xovsp', recopt=0.9, pm=0.7,
+                                                                 distribute=True,
+                                                                 proba=X_train_enc, result=Y_train,
+                                                                 drawing=0)
+        print('用时：', times, '秒')
+        # w3 = 1 - weight[0] - weight[1]
+        # print(weight)
+
+        # weightarray = np.concatenate((weight, [w3]), axis=0)
+        for element in weightarray:
+            print(element)
+        
+        test_probaF = X_test_enc[:, ::2].T
+        test_probaT = X_test_enc[:, 1::2].T
+        test_predT = np.dot(weightarray, test_probaT)
+        test_predF = np.dot(weightarray, test_probaF)
+        test_pred = np.zeros(len(test_predT))
+        test_proba = np.zeros(len(test_predT))
+        for i in range(len(test_predT)):
+            temper = test_predT[i] + test_predF[i]
+            test_proba = test_predT/temper
+            if (test_predT[i] > test_predF[i]):
+                test_pred[i] = 1
+            else:
+                test_pred[i] = 0
+                
+        my_probaF = my_test_enc[:, ::2].T
+        my_probaT = my_test_enc[:, 1::2].T
+        my_predT = np.dot(weightarray, my_probaT)
+        my_predF = np.dot(weightarray, my_probaF)
+        my_pred = np.zeros(len(my_predT))
+        my_proba = np.zeros(len(my_predT))
+        for i in range(len(my_predT)):
+            temper = my_predT[i] + my_predF[i]
+            my_proba = my_predT/temper
+            if (my_predT[i] > my_predF[i]):
+                my_pred[i] = 1
+            else:
+                my_pred[i] = 0
+                
+        m = test_proba.reshape((-1,1))
+        tmp_result = np.zeros((len(Y_test), len(categories) + 1))
+        tmp_result[:, 0], tmp_result[:, 1:] = Y_test, np.hstack([m,m])
+        prediction_result_cv.append(tmp_result)
+        
+        n = my_proba.reshape((-1,1))
+        tmp_result1 = np.zeros((len(result_test), len(categories) + 1))
+        tmp_result1[:, 0], tmp_result1[:, 1:] = result_test, np.hstack([n,n])
+        prediction_result_ind.append(tmp_result1)
+        
+        print('******交叉验证性能******')
+        confmat = confusion_matrix(Y_test, test_pred)
+        sn = confmat[1, 1] / (confmat[1, 0] + confmat[1, 1])
+        sp = confmat[0, 0] / (confmat[0, 0] + confmat[0, 1])
+        print('1. The acc score of the model {}\n'.format(accuracy_score(Y_test, test_pred)))
+        print('2. The sp score of the model {}\n'.format(sp))
+        print('3. The sn score of the model {}\n'.format(sn))
+        print('4. The mcc score of the model {}\n'.format(matthews_corrcoef(Y_test, test_pred)))
+        print('5. The auc score of the model {}\n'.format(roc_auc_score(Y_test, test_proba, average='macro')))
+        print('6. Confusion matrix \n {} \n'.format(confusion_matrix(Y_test, test_pred)))
+        
+        print('******独立测试性能******')
+        confmat = confusion_matrix(result_test, my_pred)
+        sn = confmat[1, 1] / (confmat[1, 0] + confmat[1, 1])
+        sp = confmat[0, 0] / (confmat[0, 0] + confmat[0, 1])
+        print('1. The acc score of the model {}\n'.format(accuracy_score(result_test, my_pred)))
+        print('2. The sp score of the model {}\n'.format(sp))
+        print('3. The sn score of the model {}\n'.format(sn))
+        print('4. The mcc score of the model {}\n'.format(matthews_corrcoef(result_test, my_pred)))
+        print('5. The auc score of the model {}\n'.format(roc_auc_score(result_test, my_proba, average='macro')))
+        print('6. Confusion matrix \n {} \n'.format(confusion_matrix(result_test, my_pred)))
+        
+    return prediction_result_cv, prediction_result_ind
+
+def GCForest_prediction(feature_data, result_data):
+    random_state=2019
+    n_splits = 5
+    folds = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state).split(feature_data, result_data)
+    test_pred = np.zeros(feature_data.shape[0])
+    test_proba = np.zeros(feature_data.shape[0])
+    acc_scores = np.zeros(n_splits)
+    recall_scores = np.zeros(n_splits)
+    mcc_scores = np.zeros(n_splits)
+    f1_scores = np.zeros(n_splits)
+    for j, (train_idx, test_idx) in enumerate(folds):
+        X_train = feature_data[train_idx]
+        Y_train = result_data[train_idx]
+        X_test = feature_data[test_idx]
+        Y_test = result_data[test_idx]
+        config = get_toy_config()
+        gc = GCForest(config)  # should be a dict
+        X_train_enc = gc.fit_transform(X_train, Y_train)
+        part_X_train_enc = X_train_enc[:, ::2]
+        y_pred = gc.predict(X_test)
+        X_test_enc = gc.transform(X_test)
+        part_X_test_enc = X_test_enc[:, ::2]
+        y_proba = gc.predict_proba(X_test)[:, 1]
+        acc = accuracy_score(Y_test, y_pred)
+        print("Test Accuracy of GcForest (save and load) = {:.2f} %".format(acc * 100))
+        confmat = confusion_matrix(Y_test, y_pred)
+        sn = confmat[1, 1] / (confmat[1, 0] + confmat[1, 1])
+        sp = confmat[0, 0] / (confmat[0, 0] + confmat[0, 1])
+        print('1. The acc score of the model {}\n'.format(accuracy_score(Y_test, y_pred)))
+        print('2. The sp score of the model {}\n'.format(sp))
+        print('3. The sn score of the model {}\n'.format(sn))
+        print('4. The mcc score of the model {}\n'.format(matthews_corrcoef(Y_test, y_pred)))
+        print('9. The auc score of the model {}\n'.format(roc_auc_score(Y_test, y_proba, average='macro')))
+        print('6. The recall score of the model {}\n'.format(recall_score(Y_test, y_pred, average='macro')))
+        print('5. The F-1 score of the model {}\n'.format(f1_score(Y_test, y_pred, average='macro')))
+        print('7. Classification report \n {} \n'.format(classification_report(Y_test, y_pred)))
+        print('8. Confusion matrix \n {} \n'.format(confusion_matrix(Y_test, y_pred)))
+
+        recall = recall_score(Y_test, y_pred, average='macro')
+        f1 = f1_score(Y_test, y_pred, average='macro')
+        acc = accuracy_score(Y_test, y_pred)
+        mcc = matthews_corrcoef(Y_test, y_pred)
+
+        recall_scores[j] = recall
+        f1_scores[j] = f1
+        acc_scores[j] = acc
+        mcc_scores[j] = mcc
+
+        test_pred[test_idx] = y_pred
+        test_proba[test_idx] = y_proba
+        print(
+            "CV- {} recall: {}, acc_score: {} , mcc_score: {}, f1_score: {}".format(j, recall, acc, mcc, f1))
+    confmat = confusion_matrix(result_data, test_pred)
+    sn = confmat[1, 1] / (confmat[1, 0] + confmat[1, 1])
+    sp = confmat[0, 0] / (confmat[0, 0] + confmat[0, 1])
+    print("--------------------------------------深度森林------------------------------------")
+    print('1. The acc score of the model {}\n'.format(accuracy_score(result_data, test_pred)))
+    print('2. The sp score of the model {}\n'.format(sp))
+    print('3. The sn score of the model {}\n'.format(sn))
+    print('4. The mcc score of the model {}\n'.format(matthews_corrcoef(result_data, test_pred)))
+    print('9. The auc score of the model {}\n'.format(roc_auc_score(result_data, test_proba, average='macro')))
+    print('6. The recall score of the model {}\n'.format(recall_score(result_data, test_pred, average='macro')))
+    print('5. The F-1 score of the model {}\n'.format(f1_score(result_data, test_pred, average='macro')))
+    print('7. Classification report \n {} \n'.format(classification_report(result_data, test_pred)))
+    print('8. Confusion matrix \n {} \n'.format(confusion_matrix(result_data, test_pred)))
+    
+import Function
+import os
+# 保存交叉验证集和独立测试集结果
+def save_result(cv_res, ind_res, outPath, codename):
+    mkdir(outPath)
+    out = os.path.join(outPath, codename.lower())
+    Function.save_predict_result(cv_res, out + '_pre_cv.txt')
+    cv_meanauc, cv_auc = Function.plot_roc_curve(cv_res, out + '_roc_cv.png', label_column=0, score_column=2)
+    cv_meanprc, cv_prc = Function.plot_prc_curve(cv_res, out + '_prc_cv.png', label_column=0, score_column=2)
+    cv_metrics = Function.calculate_metrics_list(cv_res, label_column=0, score_column=2, cutoff=0.5, po_label=1)
+    Function.save_prediction_metrics_list(cv_metrics, out + '_metrics_cv.txt')
+    # 保存独立测试结果
+    Function.save_predict_result(ind_res, out + '_pre_ind.txt')
+    ind_meanauc, ind_auc = Function.plot_roc_curve(ind_res, out + '_roc_ind.png', label_column=0, score_column=2)
+    ind_meanprc, ind_prc = Function.plot_prc_curve(ind_res, out + '_prc_ind.png', label_column=0, score_column=2)
+    ind_metrics = Function.calculate_metrics_list(ind_res, label_column=0, score_column=2, cutoff=0.5, po_label=1)
+    Function.save_prediction_metrics_list(ind_metrics, out + '_metrics_ind.txt')
+    return None
+   
+# 创建文件夹
+def mkdir(path):
+    path=path.strip()
+    path=path.rstrip("\\")
+    # 判断路径是否存在
+    isExists=os.path.exists(path)
+    # 判断结果
+    if not isExists:
+        # 如果不存在则创建目录
+        os.makedirs(path)
+    else:
+        # 如果目录存在则不创建
+        pass
+ 
+if __name__ == '__main__':
+    x = np.load( r'dataset\X.npy')
+    y = np.load( r'dataset\y.npy')
+    x_test = np.load( r'dataset\x_test.npy')
+    y_test = np.load( r'dataset\y_test.npy')
+    cv_res, ind_res = GAGCForest_prediction(x, y, x_test, y_test)
+    CodeName = 'new_my_Forest'
+    outputs = os.path.join(r'D:\临时程序文件\sumoforest', CodeName)
+    mkdir(outputs)
+    save_result(cv_res, ind_res, outputs, CodeName)
