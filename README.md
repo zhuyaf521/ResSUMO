@@ -1,5 +1,5 @@
 # ResSUMO
-ResSUMO: A Deep Learning Architecture Based on Residual Structure for Prediction Lysine SUMOylation Sites
+ResSUMO: A Deep Learning Architecture Based on Residual Structure for Prediction of Lysine SUMOylation Sites
 
 Requirement
 =========
